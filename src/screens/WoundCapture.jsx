@@ -146,6 +146,56 @@ function sanitizeBareHandsSteps(steps) {
   });
 }
 
+function inferLocation(text) {
+  const normalized = String(text || "").toLowerCase();
+  const locations = [
+    "head",
+    "face",
+    "neck",
+    "chest",
+    "back",
+    "shoulder",
+    "arm",
+    "elbow",
+    "hand",
+    "finger",
+    "abdomen",
+    "hip",
+    "leg",
+    "knee",
+    "ankle",
+    "foot",
+  ];
+
+  return locations.find((location) => normalized.includes(location)) || "unknown";
+}
+
+function inferBleedRate(text, condition) {
+  const normalized = `${text || ""} ${condition || ""}`.toLowerCase();
+
+  if (/spurting|gushing|arterial/.test(normalized)) return "arterial";
+  if (/bleeding heavily|heavy bleeding|severe bleeding|soaking/.test(normalized)) return "moderate";
+  if (/bleed|blood|cut|wound|laceration/.test(normalized)) return "slow";
+  return "none";
+}
+
+function buildSessionAssessment(result, originalMessage) {
+  return {
+    severity: result?.severity || "moderate",
+    wound_type: result?.condition || "general_emergency",
+    bleed_rate: inferBleedRate(originalMessage, result?.condition),
+    location: inferLocation(originalMessage),
+    immediate_risk:
+      result?.warn_message ||
+      result?._triageContext?.triage_reasoning ||
+      "Follow the emergency steps and seek medical help if symptoms worsen.",
+    contraindications: Array.isArray(result?._triageContext?.risk_flags)
+      ? result._triageContext.risk_flags
+      : [],
+    condition: result?.condition || "general_emergency",
+  };
+}
+
 function isTranscriptTriageable(text) {
   const cleaned = text?.trim().toLowerCase();
 
@@ -185,7 +235,7 @@ function isTranscriptTriageable(text) {
 }
 
 export default function WoundCapture() {
-  const { emergencyType } = useSession();
+  const { emergencyType, dispatch } = useSession();
   const [appState, setAppState] = useState("idle");
   const [conversationPhase, setConversationPhase] = useState("initial");
   const [currentSteps, setCurrentSteps] = useState([]);
@@ -721,6 +771,10 @@ export default function WoundCapture() {
         setSeverity(result.severity);
         setCondition(result.condition || "");
         setAiSource(result._source || "cloud");
+        dispatch({
+          type: "SET_WOUND",
+          payload: buildSessionAssessment(result, message),
+        });
 
         if (stage === "initial") {
           setConversationPhase("resources");
@@ -779,6 +833,7 @@ export default function WoundCapture() {
       clearAdvanceTimer,
       clearConfirmationTimer,
       clearImage,
+      dispatch,
       emergencyType,
       speakAndAdvance,
       speakText,

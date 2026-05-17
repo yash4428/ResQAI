@@ -4,10 +4,10 @@ import path from "node:path";
 const rootDir = process.cwd();
 loadEnvFile(path.join(rootDir, ".env"));
 
-const GEMINI_API_KEY = process.env.VITE_GEMMA_API_KEY || "";
-const GEMINI_MODEL = process.env.VITE_GEMMA_STUDIO_MODEL || "gemini-2.0-flash";
-const OLLAMA_URL = process.env.VITE_OLLAMA_URL || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.VITE_OLLAMA_MODEL || "resqai-gemma";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMMA_API_KEY || "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || process.env.VITE_GEMMA_STUDIO_MODEL || "gemini-2.5-flash";
+const OLLAMA_URL = process.env.OLLAMA_URL || process.env.VITE_OLLAMA_URL || "http://localhost:11434";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || process.env.VITE_OLLAMA_MODEL || "resqai";
 
 const TEST_CASES = [
   { prompt: "someone is choking", expectSeverity: "critical", expectCondition: "choking_adult" },
@@ -111,7 +111,7 @@ async function runLocal(prompt) {
 
 async function runCloud(prompt, localTriage) {
   if (!GEMINI_API_KEY) {
-    throw new Error("Missing VITE_GEMMA_API_KEY in .env");
+    throw new Error("Missing GEMINI_API_KEY in .env");
   }
 
   const triageLines = localTriage

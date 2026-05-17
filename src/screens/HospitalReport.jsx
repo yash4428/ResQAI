@@ -15,7 +15,7 @@ export default function HospitalReport() {
       setLoading(true);
       setError("");
       try {
-        const report = await callGemmaText(buildReportPrompt(session), "");
+        const report = await callGemmaText(buildReportPrompt(session), "", 2, { useLocalPriors: false });
         if (active) dispatch({ type: "SET_REPORT", payload: report });
       } catch (err) {
         if (active) setError(err.message || "Could not generate the hospital report.");

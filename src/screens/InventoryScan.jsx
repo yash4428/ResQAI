@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../context/SessionContext.jsx";
 import { callGemmaText, callGemmaVision, fileToBase64 } from "../lib/gemmaClient.js";
-import { buildInventoryPrompt, buildProtocolPrompt } from "../lib/prompts.js";
+import { buildInventoryPrompt, buildLocalEmergencySummary, buildProtocolPrompt } from "../lib/prompts.js";
 import { speakInstruction } from "../lib/tts.js";
 
 const SUGGESTED_SUPPLIES = [
@@ -177,9 +177,19 @@ export default function InventoryScan() {
     const inventory = itemNames.map((name) => ({ name }));
     dispatch({ type: "SET_INVENTORY", payload: inventory });
     try {
+      const localEmergencySummary = buildLocalEmergencySummary(
+        woundAssessment,
+        inventory,
+        "Generate first-aid protocol using only the listed supplies."
+      );
       const protocol = await callGemmaText(
         buildProtocolPrompt(woundAssessment, inventory, language),
-        ""
+        "",
+        2,
+        {
+          localEmergencySummary,
+          availableResources: itemNames.join(", "),
+        }
       );
       dispatch({ type: "SET_PROTOCOL", payload: protocol });
       dispatch({ type: "SET_PHASE", payload: "protocol" });

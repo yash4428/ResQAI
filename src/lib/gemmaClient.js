@@ -1,11 +1,8 @@
+import { callLocalTriageModel, isOllamaAvailable } from "../services/ollamaService";
+import { apiPost } from "./apiClient.js";
 import { buildWoundPrompt } from "./prompts.js";
 
-const API_KEY = import.meta.env.VITE_GEMMA_API_KEY;
-const MODE = import.meta.env.VITE_GEMMA_MODE || "studio";
-const STUDIO_MODEL = import.meta.env.VITE_GEMMA_STUDIO_MODEL || "gemini-2.5-flash";
-
-const STUDIO_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const OLLAMA_BASE = "http://localhost:11434/api/chat";
+const MODE = import.meta.env.VITE_GEMMA_MODE || "hybrid";
 
 export function parseGemmaJSON(text) {
   const raw = String(text || "");
@@ -29,70 +26,71 @@ export function parseGemmaJSON(text) {
 }
 
 function extractText(data) {
-  if (MODE === "local") {
-    return data.message?.content || "";
-  }
-  const candidate = data.candidates?.[0];
-  const parts = candidate?.content?.parts || [];
-  const text = parts.map((part) => part.text || "").join("").trim();
-  if (text) return text;
-
-  const reason = candidate?.finishReason || data.promptFeedback?.blockReason;
-  if (reason) {
-    throw new Error(`Gemma returned no text. Reason: ${reason}`);
-  }
-  return "";
+  return String(data?.text || "").trim();
 }
 
-async function callStudio(payload) {
-  if (!API_KEY && MODE !== "local") {
-    throw new Error("Missing VITE_GEMMA_API_KEY in .env");
-  }
-  const res = await fetch(`${STUDIO_BASE}/models/${STUDIO_MODEL}:generateContent?key=${API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`AI Studio error ${res.status} using ${STUDIO_MODEL}: ${err}`);
-  }
-  return res.json();
+function formatLocalTriage(localTriage) {
+  if (!localTriage) return "";
+
+  return [
+    "Local emergency priors from the fine-tuned triage model:",
+    `- Severity estimate: ${localTriage.severity || "unknown"}`,
+    `- Suspected condition: ${localTriage.condition || "unknown"}`,
+    `- Ambulance recommended: ${localTriage.call_ambulance ? "yes" : "no or unclear"}`,
+    `- Key signals: ${(localTriage.key_signals || []).join(", ") || "none extracted"}`,
+    `- Risk flags: ${(localTriage.risk_flags || []).join(", ") || "none extracted"}`,
+    `- Triage reasoning: ${localTriage.triage_reasoning || "not provided"}`,
+  ].join("\n");
 }
 
-async function callOllama(payload) {
-  const res = await fetch(OLLAMA_BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "gemma3:4b",
-      messages: [
-        { role: "system", content: payload.systemInstruction.parts[0].text },
-        { role: "user", content: payload.contents[0].parts.map(p => p.text || "").join(" ") },
-      ],
-      stream: false,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Local Gemma error ${res.status}: ${err}`);
+async function getLocalTriagePriors(localEmergencySummary, availableResources) {
+  if (!localEmergencySummary?.trim()) return null;
+
+  try {
+    if (!(await isOllamaAvailable())) return null;
+    return await callLocalTriageModel(localEmergencySummary, availableResources);
+  } catch (error) {
+    console.warn("Local triage priors unavailable for downstream generation.", error);
+    return null;
   }
-  return res.json();
+}
+
+function buildHybridUserMessage(userMessage, localTriage) {
+  if (!localTriage) {
+    return userMessage;
+  }
+
+  return [
+    formatLocalTriage(localTriage),
+    "",
+    "Use the local triage priors as guidance, not as the final answer.",
+    "",
+    userMessage,
+  ].join("\n");
 }
 
 // TEXT CALL — for protocol generation, fallback, report
-export async function callGemmaText(systemPrompt, userMessage, retries = 2) {
-  const payload = {
-    systemInstruction: { parts: [{ text: systemPrompt }] },
-    contents: [{ role: "user", parts: [{ text: userMessage }] }],
-    generationConfig: { temperature: 0.3, responseMimeType: "application/json" },
-  };
+export async function callGemmaText(systemPrompt, userMessage, retries = 2, options = {}) {
+  const {
+    useLocalPriors = MODE !== "studio",
+    localEmergencySummary = "",
+    availableResources = "",
+  } = options;
+
+  const localTriage =
+    MODE === "local" || !useLocalPriors
+      ? null
+      : await getLocalTriagePriors(localEmergencySummary, availableResources);
+  const finalUserMessage = buildHybridUserMessage(userMessage, localTriage);
 
   for (let i = 0; i <= retries; i++) {
     try {
-      const data = MODE === "local"
-        ? await callOllama(payload)
-        : await callStudio(payload);
+      const payload = {
+        systemPrompt,
+        userMessage: finalUserMessage,
+        mode: MODE,
+      };
+      const data = await apiPost("/api/ai/text", payload);
       const text = extractText(data);
       return parseGemmaJSON(text);
     } catch (e) {
@@ -110,23 +108,14 @@ export async function callGemmaVision(
   retries = 2,
   userText = "Analyze this image and return JSON as instructed."
 ) {
-  const payload = {
-    systemInstruction: { parts: [{ text: systemPrompt }] },
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { inlineData: { mimeType, data: base64Image } },
-          { text: userText },
-        ],
-      },
-    ],
-    generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
-  };
-
   for (let i = 0; i <= retries; i++) {
     try {
-      const data = await callStudio(payload); // vision always uses Studio
+      const data = await apiPost("/api/ai/vision", {
+        systemPrompt,
+        base64Image,
+        mimeType,
+        userText,
+      });
       const text = extractText(data);
       return parseGemmaJSON(text);
     } catch (e) {

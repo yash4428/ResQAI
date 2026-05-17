@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
+import { apiGet, getApiBaseLabel } from "../lib/apiClient.js";
 import { isOllamaAvailable } from "../services/ollamaService";
-
-const OLLAMA_URL = import.meta.env.VITE_OLLAMA_URL || "http://localhost:11434";
 
 function StatusPill({ label, status }) {
   return (
@@ -16,9 +15,10 @@ export default function AIHealthPanel() {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [localReady, setLocalReady] = useState(false);
+  const [cloudConfigured, setCloudConfigured] = useState(false);
+  const [backendMode, setBackendMode] = useState("hybrid");
   const [lastChecked, setLastChecked] = useState("");
 
-  const cloudConfigured = Boolean(import.meta.env.VITE_GEMMA_API_KEY);
   const offlineReady = true;
   const isOnline = navigator.onLine;
 
@@ -33,10 +33,16 @@ export default function AIHealthPanel() {
   async function refreshHealth() {
     setLoading(true);
     try {
-      const available = await isOllamaAvailable();
+      const [available, health] = await Promise.all([
+        isOllamaAvailable(),
+        apiGet("/api/health"),
+      ]);
       setLocalReady(available);
+      setCloudConfigured(Boolean(health?.cloudConfigured));
+      setBackendMode(String(health?.mode || "hybrid"));
     } catch {
       setLocalReady(false);
+      setCloudConfigured(false);
     } finally {
       setLastChecked(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       setLoading(false);
@@ -74,7 +80,8 @@ export default function AIHealthPanel() {
 
           <div className="health-panel__meta">
             <span>Network: {isOnline ? "online" : "offline"}</span>
-            <span>Ollama: {OLLAMA_URL}</span>
+            <span>API: {getApiBaseLabel()}</span>
+            <span>Mode: {backendMode}</span>
             <span>Last checked: {lastChecked || "not yet"}</span>
           </div>
         </div>

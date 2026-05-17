@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../context/SessionContext.jsx";
 import { callGemmaText } from "../lib/gemmaClient.js";
-import { buildFallbackPrompt } from "../lib/prompts.js";
+import { buildFallbackPrompt, buildLocalEmergencySummary } from "../lib/prompts.js";
 import { speakInstruction, stopSpeaking } from "../lib/tts.js";
 
 function formatTime(totalSeconds) {
@@ -56,9 +56,19 @@ export default function StepExecution({ currentStep, isLastStep }) {
     setError("");
     dispatch({ type: "STEP_FAILED" });
     try {
+      const localEmergencySummary = buildLocalEmergencySummary(
+        woundAssessment,
+        inventory,
+        `Current step failed: ${displayStep.action}`
+      );
       const fallback = await callGemmaText(
         buildFallbackPrompt(displayStep, inventory, language),
-        ""
+        "",
+        2,
+        {
+          localEmergencySummary,
+          availableResources: inventory.map((item) => item.name).join(", "),
+        }
       );
       setDisplayStep(fallback);
       setRemaining(fallback.timer_seconds || 0);

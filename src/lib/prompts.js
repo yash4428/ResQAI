@@ -40,9 +40,9 @@ export function buildProtocolPrompt(woundAssessment, inventory, language) {
 
   return `You are an emergency first-aid AI. Generate a step-by-step protocol.
 
-INJURY: ${woundAssessment.wound_type}, Severity: ${woundAssessment.severity}, Location: ${woundAssessment.location}
-BLEED RATE: ${woundAssessment.bleed_rate}
-IMMEDIATE RISK: ${woundAssessment.immediate_risk}
+INJURY: ${woundAssessment?.wound_type || woundAssessment?.condition || "general_emergency"}, Severity: ${woundAssessment?.severity || "moderate"}, Location: ${woundAssessment?.location || "unknown"}
+BLEED RATE: ${woundAssessment?.bleed_rate || "unknown"}
+IMMEDIATE RISK: ${woundAssessment?.immediate_risk || "unknown"}
 
 AVAILABLE ITEMS ONLY: ${inventoryList}
 
@@ -78,6 +78,35 @@ JSON SCHEMA:
   "when_to_stop": "string (critical threshold description)",
   "do_not": ["string array of absolute contraindications"]
 }`;
+}
+
+export function buildLocalEmergencySummary(
+  woundAssessment,
+  inventory = [],
+  extraDetails = ""
+) {
+  const items = inventory
+    .map((item) => (typeof item === "string" ? item : item?.name))
+    .filter(Boolean)
+    .join(", ");
+
+  const lines = [
+    `Condition: ${woundAssessment?.wound_type || woundAssessment?.condition || "general_emergency"}`,
+    `Severity: ${woundAssessment?.severity || "moderate"}`,
+    `Location: ${woundAssessment?.location || "unknown"}`,
+    `Bleeding: ${woundAssessment?.bleed_rate || "unknown"}`,
+    `Immediate risk: ${woundAssessment?.immediate_risk || "unknown"}`,
+  ];
+
+  if (items) {
+    lines.push(`Available items: ${items}`);
+  }
+
+  if (extraDetails?.trim()) {
+    lines.push(`Extra details: ${extraDetails.trim()}`);
+  }
+
+  return lines.join(". ");
 }
 
 export function buildFallbackPrompt(originalStep, inventory, language, failureDescription = "user reported step not working") {
@@ -135,7 +164,7 @@ export function buildReportPrompt(session) {
 LANGUAGE: English always (for medical staff).
 
 SESSION DATA:
-- Injury: ${session.woundAssessment?.wound_type}, ${session.woundAssessment?.severity}, ${session.woundAssessment?.location}
+- Injury: ${session.woundAssessment?.wound_type || session.woundAssessment?.condition || "general_emergency"}, ${session.woundAssessment?.severity || "moderate"}, ${session.woundAssessment?.location || "unknown"}
 - Bleed rate: ${session.woundAssessment?.bleed_rate}
 - Steps performed: ${completedSteps}
 - Failures encountered: ${session.failureCount}
